@@ -1,0 +1,60 @@
+{
+ "prereg": {
+  "j1": "uniform analytic MSE≤1e-12",
+  "j2": "gravity≤1e-9+Benettin 对拍",
+  "j3": "scatter>0"
+ },
+ "results": {
+  "uniform": {
+   "analytic_mse_phys": 0.0,
+   "analytic_a": 0.0682389119329428,
+   "koop": {
+    "mse_phys": 0.5242974167085777,
+    "a": NaN
+   },
+   "mlp": {
+    "mse_phys": 0.5831379898184155,
+    "a": NaN
+   },
+   "benettin_lambda": [
+    0.004421912039663261,
+    1
+   ]
+  },
+  "gravity": {
+   "analytic_mse_phys": 0.06136666666666665,
+   "analytic_a": 0.03979915573597676,
+   "koop": {
+    "mse_phys": 0.6813760515846568,
+    "a": NaN
+   },
+   "mlp": {
+    "mse_phys": 0.6740887402182753,
+    "a": NaN
+   },
+   "benettin_lambda": [
+    0.004421912039663261,
+    1
+   ]
+  },
+  "scatter": {
+   "analytic_mse_phys": 0.8273387760148544,
+   "analytic_a": 0.057058255223527726,
+   "koop": {
+    "mse_phys": 1.6122834968144102,
+    "a": NaN
+   },
+   "mlp": {
+    "mse_phys": 1.6651239237344035,
+    "a": NaN
+   },
+   "benettin_lambda": [
+    0.10088207967039677,
+    397
+   ]
+  }
+ },
+ "j1": true,
+ "j3": true,
+ "elapsed_s": 106.0
+}

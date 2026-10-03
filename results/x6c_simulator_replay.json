@@ -1,0 +1,10 @@
+{
+ "seq_i": 0,
+ "replay_match": 1.0,
+ "n_bounce": 3,
+ "traj_err_max": 0.0,
+ "iou_mean": 1.0,
+ "iou_min": 1.0,
+ "s_full": true,
+ "elapsed_s": 8.3
+}
