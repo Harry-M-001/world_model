@@ -1,6 +1,8 @@
 # 低精度世界模型的可用性判据与设计方法
 ## Usability Criteria and Design Methodology for Low-Precision World Models
 
+[![DOI](https://zenodo.org/badge/DOI/10.5281/zenodo.23134088.svg)](https://doi.org/10.5281/zenodo.23134088)
+
 四个阶段、四篇预印本的完整代码与论文集合。核心问题：**低精度世界模型何时可用、如何设计**——当推理端量化（INT8/FP8/FP4）压缩世界模型的潜空间时，误差沿自回归轨迹放大导致崩坏；本工作给出度量、判据、闭环验证、设计方法与模态边界的完整回答。
 
 ## 论文链条
@@ -86,7 +88,9 @@ python code/x3_koop_closedloop.py
   title={低精度世界模型的可用性度量},
   author={马浩睿},
   year={2026},
-  note={ChinaXiv 预印本（P1）}
+  note={ChinaXiv 预印本（P1）},
+  doi={10.5281/zenodo.23134088},
+  url={https://doi.org/10.5281/zenodo.23134088}
 }
 ```
 
