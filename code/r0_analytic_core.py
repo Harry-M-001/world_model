@@ -118,6 +118,7 @@ def main():
     }
     for nm, (cls_f, spec) in plans.items():
         as_, ms_, n_par = [], [], None
+        aown, ajac = [], []          # ★ 2026-10-05 正确口径（twin_a 已同时返回）
         for sd in SEEDS:
             m = cls_f().to(DEV)
             if n_par is None:
@@ -125,27 +126,49 @@ def main():
             m = train(m, ztr, sd, spec=spec)
             mc = margin_and_cos(m, zva, mean, std)
             ta = twin_a(m, zva, mean, std)
-            as_.append(ta["a"]); ms_.append(mc["margin"])
+            as_.append(ta["a"])
+            if ta.get("a_own") is not None:
+                aown.append(ta["a_own"])
+            if ta.get("a_jac") is not None:
+                ajac.append(ta["a_jac"])
+            ms_.append(mc["margin"])
             del m
             torch.cuda.empty_cache()
         results[nm] = dict(a_mean=float(np.mean(as_)), a_sd=float(np.std(as_, ddof=1)),
                            margin_mean=float(np.mean(ms_)), margin_sd=float(np.std(ms_, ddof=1)),
-                           per_seed_a=[round(x, 4) for x in as_], n_params=int(n_par))
-        print(f"  {nm:<10} a={results[nm]['a_mean']:+.4f}±{results[nm]['a_sd']:.4f} "
-              f"margin={results[nm]['margin_mean']:+.4f}±{results[nm]['margin_sd']:.4f} 参数 {n_par}")
+                           per_seed_a=[round(x, 4) for x in as_], n_params=int(n_par),
+                           a_own_mean=float(np.mean(aown)) if aown else None,
+                           a_own_sd=float(np.std(aown, ddof=1)) if len(aown) > 1 else 0.0,
+                           a_jac_mean=float(np.mean(ajac)) if ajac else None,
+                           a_jac_sd=float(np.std(ajac, ddof=1)) if len(ajac) > 1 else 0.0)
+        print(f"  {nm:<10} a_old={results[nm]['a_mean']:+.4f}±{results[nm]['a_sd']:.4f}"
+              f"  a_own={results[nm]['a_own_mean']}  a_jac={results[nm]['a_jac_mean']}"
+              f"  margin={results[nm]['margin_mean']:+.4f} 参数 {n_par}")
 
     an = results["analytic"]
     r0_pass = bool(an["a_mean"] <= REF_KOOP["a"] and an["margin_mean"] >= MARGIN_FLOOR)
-    print(f"\nR0 判定：analytic a={an['a_mean']:+.4f}（门限 ≤{REF_KOOP['a']}）｜"
-          f"margin={an['margin_mean']:+.4f}（门限 ≥{MARGIN_FLOOR:.4f}）→ "
-          f"{'PASS：解析先验有增益' if r0_pass else 'FAIL：解析先验无增益（如实记录）'}")
-    print(f"解析可设计性对拍：公式预测 a=0（外推算子重根 ρ=1）｜实测 a={an['a_mean']:+.4f} "
-          f"⇒ 残差+有限样本贡献 {an['a_mean']:+.4f}")
+    # ★ 同口径重判：解析核 a 与 koop a 必须用**同一口径**比较
+    ko_a = results["koop_s05"].get("a_own_mean")
+    r0_pass_correct = bool(an.get("a_own_mean") is not None and ko_a is not None
+                           and an["a_own_mean"] <= ko_a
+                           and an["margin_mean"] >= MARGIN_FLOOR)
+    print(f"\nR0 判定（旧口径，共享 prev）：analytic a={an['a_mean']:+.4f}"
+          f"（门限 ≤{REF_KOOP['a']}）→ {'PASS' if r0_pass else 'FAIL'}")
+    print(f"R0 判定（★正确口径，a_own）：analytic a={an.get('a_own_mean'):+.4f}"
+          f" vs 同口径 koop a={ko_a:+.4f}"
+          f"（margin 门限 ≥{MARGIN_FLOOR:.4f}）→ {'PASS：解析先验有增益' if r0_pass_correct else 'FAIL'}")
+    print(f"（a_jac 独立印证：analytic {an.get('a_jac_mean'):+.4f} / "
+          f"koop {results['koop_s05'].get('a_jac_mean'):+.4f} / "
+          f"mlp {results['mlp'].get('a_jac_mean'):+.4f}）")
+    print(f"解析可设计性对拍：公式预测 a=0（外推算子重根 ρ=1）｜实测 a_own={an.get('a_own_mean'):+.4f}"
+          f" ⇒ 残差+有限样本贡献 {an.get('a_own_mean'):+.4f}")
 
     out = dict(prereg=dict(rule="a≤0.239 AND margin≥0.8×0.077", s_res=S_RES, seeds=list(SEEDS),
-                           analytic_prediction_a=0.0),
+                           analytic_prediction_a=0.0,
+                           rule_correct="同口径比较：a_own(analytic) ≤ a_own(koop) AND margin≥floor"),
                results=results, ref=dict(koop=REF_KOOP, mlp=REF_MLP),
-               r0_pass=r0_pass, elapsed_s=round(time.time() - t0, 1))
+               r0_pass=r0_pass, r0_pass_correct=r0_pass_correct,
+               elapsed_s=round(time.time() - t0, 1))
     json.dump(out, open(OUT_JSON, "w", encoding="utf-8"), ensure_ascii=False, indent=1)
     print(f"产物 → {OUT_JSON}（{out['elapsed_s']}s）")
 
