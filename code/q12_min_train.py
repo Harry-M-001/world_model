@@ -174,6 +174,9 @@ def twin_a(m, zva, mean, std, eps=EPS_TWIN, n_pairs=N_PAIRS):
                 p, _ = m64(torch.stack([za, zb], dim=1), None, None)
                 p2, _ = m64(torch.stack([za, zb2], dim=1), None, None)
                 d.append(float((p2 - p).norm()))
+                # ⚠ [2026-10-05] 旧孪生口径：两条分支**共享 prev 帧**，测的是 ρ(∂f/∂st)，
+                #   不是模型自回归的误差放大（λ=0 的系统会被读成 +0.66 量级）。
+                #   新结论请改用 code/_twinlib.py 的 twin_lam（各带历史）+ lam_jac（谱半径）。
                 za, zb, zb2 = zb, p, p2
             sl.append(d)
     d = np.array(sl)                       # (n_pairs, H+1)
@@ -194,13 +197,49 @@ def twin_a(m, zva, mean, std, eps=EPS_TWIN, n_pairs=N_PAIRS):
     med = np.median(d, axis=0)
     start = max(int(np.argmax(med / med[0] >= REL_ORDERS)), 1)
     v_rel, drop_rel = _lam(start, start + WIN)
-    return dict(a=float(np.median(v_fix)),                 # ★ 主口径（跨臂只用它）
+    # ★ 2026-10-05 口径修正：旧 `a`（共享 prev）是伪读数，保留仅为复现历史；
+    #   新增 `a_own`（各带历史，正确）与 `a_jac`（谱半径，独立印证）。
+    extra = _correct_caliber(m, zva, mean, std)
+    return dict(a=float(np.median(v_fix)),                 # 【旧口径·废弃】仅供复现
                 a_p10=float(np.percentile(v_fix, 10)),
                 a_p90=float(np.percentile(v_fix, 90)),
                 a_rel=float(np.median(v_rel)) if v_rel else None,
                 window=[FIX_T0, FIX_T0 + WIN], win_rel=[start, start + WIN],
                 start_step=start, n_pairs=len(v_fix),
-                n_drop_fix=drop_fix, n_drop_rel=drop_rel)
+                n_drop_fix=drop_fix, n_drop_rel=drop_rel, **extra)
+
+
+def _correct_caliber(m, zva, mean, std):
+    """正确口径（_twinlib）：a_own（孪生各带历史）+ a_jac（谱半径）。失败不致命。"""
+    try:
+        import _twinlib as TL
+        mean64 = mean.to(DEV).double()
+        std64 = std.to(DEV).double()
+        m64 = m.double()
+
+        def fwd(sp, st):
+            with torch.no_grad():
+                p, _ = m64(torch.stack([sp.reshape(1, -1), st.reshape(1, -1)], dim=1),
+                           None, None)
+            return p.reshape(-1)
+
+        vals_own, vals_jac = [], []
+        for k in range(N_PAIRS):
+            s = k % zva.shape[0]
+            sp = ((zva[s, 4].to(DEV).double() - mean64) / std64)
+            st = ((zva[s, 5].to(DEV).double() - mean64) / std64)
+            torch.manual_seed(5000 + k)
+            v = TL.twin_lam(fwd, sp, st, t1=FIX_T0, t2=FIX_T0 + WIN, delta=1e-4)
+            if np.isfinite(v):
+                vals_own.append(v)
+            r = TL.lam_jac(fwd, sp, st)
+            if np.isfinite(r):
+                vals_jac.append(r)
+        return dict(a_own=float(np.median(vals_own)) if vals_own else None,
+                    a_jac=float(np.median(vals_jac)) if vals_jac else None,
+                    caliber="correct(twinlib: own-history + jac-eigvals)")
+    except Exception as e:                       # 口径补充失败不得影响主流程
+        return dict(a_own=None, a_jac=None, caliber=f"fallback: {type(e).__name__}")
 
 
 def _summary_path(tag=""):
