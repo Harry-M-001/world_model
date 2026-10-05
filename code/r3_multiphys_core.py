@@ -133,8 +133,13 @@ class MLP(nn.Module):
         return self.mlp(torch.cat([sp, st], dim=1))
 
 
-def twin_a_model(fwd_fn, val_trajs, seed):
-    """val_trajs: list of (T,8) 物理轨迹。物理空间孪生（无动作）。"""
+def twin_a_model(fwd_fn, val_trajs, seed, mode="own"):
+    """val_trajs: list of (T,8) 物理轨迹。物理空间孪生（无动作）。
+
+    ⚠ 2026-10-05 口径修正：mode="own" 为**正确口径**（两条分支各带自己的历史）；
+      mode="shared" 是旧写法（共享 prev），测的是 ρ(∂f/∂st)，仅供复现历史值。
+      默认已改为 "own"。
+    """
     rng = np.random.default_rng(5000 + seed)
     lams = []
     for _ in range(16):
@@ -145,12 +150,16 @@ def twin_a_model(fwd_fn, val_trajs, seed):
         dv = (torch.randn(zb.shape, generator=torch.Generator(device='cpu').manual_seed(5000 + int(rng.integers(0, 999999)))).double().to(DEV))
         zb2 = zb + dv / dv.norm() * 1e-9
         sep = [1e-9]
+        a1, b1, a2, b2 = za, zb, za, zb2
         for t in range(30):
-            p1 = torch.tensor(fwd_fn(za.unsqueeze(0), zb.unsqueeze(0)), dtype=torch.float64, device=DEV)[0]
-            p2 = torch.tensor(fwd_fn(za.unsqueeze(0), zb2.unsqueeze(0)), dtype=torch.float64, device=DEV)[0]
-            d = p2 - p1
+            p1 = torch.tensor(fwd_fn(a1.unsqueeze(0), b1.unsqueeze(0)), dtype=torch.float64, device=DEV)[0]
+            if mode == "shared":
+                p2 = torch.tensor(fwd_fn(a1.unsqueeze(0), b2.unsqueeze(0)), dtype=torch.float64, device=DEV)[0]
+                a1, b1, b2 = b1, p1, p2
+            else:
+                p2 = torch.tensor(fwd_fn(a2.unsqueeze(0), b2.unsqueeze(0)), dtype=torch.float64, device=DEV)[0]
+                a1, b1, a2, b2 = b1, p1, b2, p2
             sep.append(float((p2 - p1).norm().cpu()) if torch.is_tensor(p2 - p1) else float(np.linalg.norm(p2 - p1)))
-            za, zb, zb2 = zb, p1, p2
         arr = np.array(sep)
         if not np.isfinite(arr).all():
             continue
