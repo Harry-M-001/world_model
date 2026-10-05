@@ -49,6 +49,14 @@ V_MAX = 3
 T_FRAMES = 20
 N_DIGIT = 2                      # 与 gray_s3 / T18 一致（VAE 的训练分布）
 SPEEDS = (1, 2, 3)
+
+# P1 新三档常量
+G_PROJ = 0.5          # 抛体重力（每步 vy 增量）
+MU_K = 0.12           # 库仑摩擦系数（每步减速度）
+G_FRI = 1.0
+K_HARM = 0.02         # 简谐弹簧刚度
+DT_H = 1.0            # 谐振子步长
+HARM_C = 32.0         # 平衡中心
 T_SWITCH = 10                    # 序列内唯一一次切换（帧索引）
 G_CHOICES = (0.4, 0.5, 0.6)      # 重力场强度（每序列一个，均匀场 → 作用于所有数字）
 E_REST = 1.0                     # 恢复系数（弹性）
@@ -76,8 +84,16 @@ CONFIG = dict(
 
 
 # ---------------------------------------------------------------- 单步推进
-def step_state(st, proc, g=0.0, e=E_REST, v_max=V_MAX, boundary="reflect"):
+def step_state(st, proc, g=0.0, e=E_REST, v_max=V_MAX, boundary="reflect",
+               gp=None, dec=None, kh=None):
     """推进一帧。st: (n,4) float64 [x,y,vx,vy]（左上角坐标）。返回 (新状态, 碰撞次数)。
+
+    P2 新增可选参数（**默认 None = 沿用模块常量，既有调用逐位不变**）：
+      gp  : projectile 的重力加速度（默认 G_PROJ）
+      dec : friction 的每步减速度 = μ·g_f（默认 MU_K*G_FRI）
+      kh  : harmonic 的弹簧刚度（默认 K_HARM）
+      —— 目的是让新三档支持「每序列采样参数」，解析核必须**从数据自估参数**
+         （只知道形式、不知道参数），避免把常量硬编码进模型造成信息泄漏。
 
     与 t15/t18 保持同一顺序：**先改速度（重力）→ 再移动 → 边界处理 → 盘-盘接触**。
     boundary="reflect" 时与 collide.step_state 完全一致（仅动作项被换成过程规则）。
@@ -85,6 +101,22 @@ def step_state(st, proc, g=0.0, e=E_REST, v_max=V_MAX, boundary="reflect"):
     st = np.array(st, dtype=np.float64, copy=True)
     if proc == "gravity":
         st[:, 3] = np.clip(st[:, 3] + g, -v_max, v_max)
+    elif proc == "projectile":
+        # 抛体：匀加速（g 可每序列采样；P1 验证的是默认 G_PROJ）
+        st[:, 3] = st[:, 3] + (G_PROJ if gp is None else gp)
+    elif proc == "friction":
+        # 库仑摩擦：恒定减速度 dec（=μ·g_f），方向与速度相反，减到 0 停止
+        d_ = (MU_K * G_FRI) if dec is None else dec
+        sp = np.hypot(st[:, 2], st[:, 3])
+        ns = np.maximum(sp - d_, 0.0)
+        scale = np.where(sp > 1e-12, ns / np.maximum(sp, 1e-12), 0.0)
+        st[:, 2] *= scale
+        st[:, 3] *= scale
+    elif proc == "harmonic":
+        # 简谐振动：弹簧回复力 F = -k(x - C)（平衡中心 C=HARM_C）
+        k_ = K_HARM if kh is None else kh
+        st[:, 2] = st[:, 2] - k_ * (st[:, 0] - HARM_C) * DT_H
+        st[:, 3] = st[:, 3] - k_ * (st[:, 1] - HARM_C) * DT_H
     elif proc == "damped":
         st[:, 2] *= (1.0 - GAMMA_D)            # 各向同性线性阻力（速度只衰减不反向）
         st[:, 3] *= (1.0 - GAMMA_D)
@@ -97,6 +129,8 @@ def step_state(st, proc, g=0.0, e=E_REST, v_max=V_MAX, boundary="reflect"):
     if boundary == "periodic":
         st[:, 0] = np.mod(st[:, 0], float(LIM))
         st[:, 1] = np.mod(st[:, 1], float(LIM))
+    elif boundary == "none":
+        pass                                   # P1：无边界（抛体/摩擦/谐振子的纯物理解析验证）
     else:
         for k in range(st.shape[0]):
             if st[k, 0] < 0.0 or st[k, 0] > LIM:
